@@ -1,0 +1,25 @@
+---
+  - name: sgedisk 
+    ansible.builtin.shell: "{{ item }}"
+    loop:
+      - sgdisk -e /dev/sda
+      - partprobe      
+    tags: sgdisk
+
+
+  - name: Create a xfs filesystem on /dev/sda4
+    community.general.filesystem:
+      fstype: xfs
+      dev: /dev/sda4
+      force: true
+      opts: -m uuid={{ UUID }}
+    tags: xfs
+    ignore_errors: yes
+
+  - name: mount varlog XFS partition on /mnt for rsync from /var/log to /mnt
+    ansible.posix.mount:
+      path: /mnt
+      src: UUID={{ UUID }}
+      fstype: xfs
+      state: mounted
+    tags: mount

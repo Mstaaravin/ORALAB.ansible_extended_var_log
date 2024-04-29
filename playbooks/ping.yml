@@ -1,0 +1,10 @@
+---
+- hosts: "{{ hosts | default('all') }}"
+  gather_facts: false
+  remote_user: opc
+  become: true 
+
+  tasks:
+
+   - name: ping
+     ping: 

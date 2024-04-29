@@ -1,0 +1,40 @@
+---
+  - name: dd iflag only for new resized device
+    ansible.builtin.shell: dd iflag=direct if=/dev/oracleoci/oraclevda of=/dev/null count=1
+    tags: iflag
+
+  - name: rescan only for new resized device
+    ansible.builtin.shell: echo "1" | tee /sys/class/block/`readlink /dev/oracleoci/oraclevda | cut -d'/' -f 2`/device/rescan
+    tags: rescan
+
+  - name: parted (fix + resizepart 3 + pvresize)
+    ansible.builtin.shell: "{{ item }}"
+    loop: 
+      - printf "fix\n" | parted ---pretend-input-tty /dev/sda print
+      - parted /dev/sda resizepart 3 100%
+      - pvresize /dev/sda3
+    tags: rescan
+
+  - name: Create a logical volume with all remaining space in the volume group
+    community.general.lvol:
+      vg: ocivolume
+      lv: varlog
+      size: 100%FREE
+    tags: lvm
+
+  - name: Create a xfs filesystem on /dev/ocivolume/varlog
+    community.general.filesystem:
+      fstype: xfs
+      dev: /dev/ocivolume/varlog
+      force: true
+      opts: -m uuid={{ UUID }}
+    tags: xfs
+    ignore_errors: yes
+
+  - name: mount varlog XFS partition on /mnt for rsync from /var/log to /mnt
+    ansible.posix.mount:
+      path: /mnt
+      src: /dev/ocivolume/varlog
+      fstype: xfs
+      state: mounted
+    tags: mount

@@ -1,0 +1,57 @@
+---
+  - name: dd + rescan device
+    ansible.builtin.shell: "{{ item }}"
+    loop:
+      - dd iflag=direct if=/dev/sda of=/dev/null count=1
+      - echo 1 > /sys/block/sda/device/rescan
+    tags: fix
+
+  - name: parted (fix)
+    ansible.builtin.shell: "{{ item }}"
+    loop:
+      - printf "fix\n" | parted ---pretend-input-tty /dev/sda print
+    tags: fix
+
+  - name: read disk geometry and use free space starting sector as a variable for a new partition
+    ansible.builtin.shell: parted /dev/sda unit s print free |awk '$1 {print $1}' |sed -n '$p'
+    register: starting_sector
+    tags: sector
+
+  - name: Print "{{ starting_sector.stdout }}" variable
+    ansible.builtin.debug:
+      msg: "{{ starting_sector.stdout }}"
+    tags: show
+
+  #  - name: create new partition from "{{ starting_sector }}" and complete 100% disk space
+  #    ansible.builtin.shell: parted /dev/sda mkpart xfs "{{ starting_sector.stdout}}" 100%
+  #    tags: parted
+
+  - name: Create a new /dev/sda4 partition with parted 
+    community.general.parted:
+      device: /dev/sda
+      number: 4
+      unit: s
+      label: gpt
+      state: present
+      name: /var/log
+      fs_type: xfs
+      part_start: "{{ starting_sector.stdout }}"
+      part_end: "100%"
+    tags: parted
+
+  - name: Create a xfs filesystem on /dev/sda4
+    community.general.filesystem:
+      fstype: xfs
+      dev: /dev/sda4
+      force: true
+      opts: -m uuid={{ UUID }}
+    tags: xfs
+    ignore_errors: yes
+
+  - name: mount varlog XFS partition on /mnt for rsync from /var/log to /mnt
+    ansible.posix.mount:
+      path: /mnt
+      src: UUID={{ UUID }}
+      fstype: xfs
+      state: mounted
+    tags: mount

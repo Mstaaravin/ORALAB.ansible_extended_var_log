@@ -1,0 +1,63 @@
+---
+# Playbook for extend boot volume inside OS (you need to increase disk size outside OS, from OCI console or with terraform) 
+# create a new logical volume and clone /var/log content being considerated with selinux
+- hosts: "{{ hosts | default('all') }}"
+  become: true
+  become_method: sudo
+  gather_facts: yes
+
+
+  tasks:
+  - name: Set UUID
+    set_fact: UUID="{{1000 | random | to_uuid }}"
+    tags: uuid
+
+  - name: Print "{{ UUID }}" variable
+    ansible.builtin.debug:
+      msg: "{{ UUID }}"
+    tags: uuid
+
+  - name: include resizing tasks playbook only for OS without LVM
+    ansible.builtin.import_tasks: ~/ansible/claroCO/extendvarlog/playbooks/noLVM.yml
+    when: ansible_distribution == 'OracleLinux' and ansible_distribution_major_version == '7'
+
+  - name: include resizing tasks playbook only for RHEL 8.x without LVM
+    ansible.builtin.import_tasks: ~/ansible/claroCO/extendvarlog/playbooks/rhel.yml
+    when: ansible_distribution == 'RedHat' and ansible_distribution_major_version == '7' or == '8'
+
+  - name: include resizing tasks playbook only for OS with LVM
+    ansible.builtin.import_tasks: ~/ansible/claroCO/extendvarlog/playbooks/LVM.yml
+    when: ansible_distribution == 'OracleLinux' and ansible_distribution_major_version == '8'
+
+  - name: apply SELinux context to filesystem /mnt
+    ansible.builtin.shell: "{{ item }}"
+    loop:
+      - chcon system_u:object_r:var_log_t:s0 /mnt
+      - semanage fcontext -a -t var_log_t "/mnt(/.*)?"
+    ignore_errors: yes
+    tags: selinux
+
+  - name: rsync /var/log /mnt
+    ansible.builtin.shell: "{{ item }}"
+    loop: 
+      - rsync -av -A -X /var/log/ /mnt/
+    tags: rsync
+
+  - name: unmount /mnt
+    ansible.posix.mount:
+      path: /mnt
+      state: absent
+    tags: umount
+
+  - name: Mount up device by UUID
+    ansible.posix.mount:
+      path: /var/log
+      src: UUID={{ UUID }}
+      fstype: xfs
+      state: present
+    tags: fstab
+
+  - name: Reboot VM
+    ansible.builtin.reboot:
+      reboot_timeout: 120
+    tags: reboot
